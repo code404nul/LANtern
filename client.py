@@ -1,46 +1,62 @@
 import asyncio
 from json import dumps
 from random import choice
+import threading
 
-async def ainput(prompt: str = "") -> str:
-    return await asyncio.to_thread(input, prompt)
+class Stop(Exception):
+    pass
 
-async def mk_json(visibility: str = "", msg: str = "") -> str:
+def get_input(loop, msgs):
+    while True:
+        loop.call_soon_threadsafe(msgs.put_nowait, input(""))
+
+
+def mk_json(visibility: str = "", msg: str = "") -> str:
     return dumps({"visibility" : visibility, "content" : f"{msg} + visibility : {visibility}"})+ "\n"
 
 async def server_response(reader):
     while True:
         
         reponse = await reader.readline()
-        print(f"Réponse : {reponse.decode()!r}")
+        if not reponse: 
+            raise Stop
+        print(f"> Réponse : {reponse.decode()!r}")
 
-async def send_msg(writer):
+async def send_msg(writer, msgs):
     while True:
 
-        msg = await ainput("Ton nom : ")
+        msg = await msgs.get()
 
-        if msg == "[close]":
-            raise SystemError
+        if msg:
+            if msg == "[close]":
+                raise Stop
 
-        result = await mk_json(choice(["private", "global"]), msg)
-        writer.write(result.encode())
-        await writer.drain()
+            result = mk_json(choice(["private", "global"]), msg)
+            writer.write(result.encode())
+            await writer.drain()
 
 
 async def main():
     reader, writer = await asyncio.open_connection("127.0.0.1", 8888)
     print("Connecté au serveur")
 
+    msgs = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(server_response(reader))
-        tg.create_task(send_msg(writer))
+    input_thread = threading.Thread(target=get_input, args = (loop, msgs), daemon=True)
 
-        except
+    try:
+        input_thread.start()
+        async with asyncio.TaskGroup() as tg:
+        
+            tg.create_task(send_msg(writer, msgs))
+            tg.create_task(server_response(reader))
+    except* Stop:
+        print("Arret")
 
-    
-    writer.close()
-    await writer.wait_closed()
+    finally:
+        writer.close()
+        await writer.wait_closed()
             
 
 
