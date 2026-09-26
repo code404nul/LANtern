@@ -52,7 +52,7 @@ class Server:
 
     def __init__(self, config: Config | None = None) -> None:
         """Prépare le serveur sans ouvrir de socket ; ``None`` = ``Config()``."""
-        raise NotImplementedError
+        self.config = config
 
     # --- Démarrage et arrêt -------------------------------------------------
 

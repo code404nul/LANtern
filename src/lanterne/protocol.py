@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import struct
 from typing import Any
+from json import dumps, loads
 
 PROTOCOL_VERSION = 1
 """Version du protocole, vérifiée pendant le handshake."""
@@ -45,7 +46,7 @@ class ProtocolError(Exception):
 
 def is_reserved(msg_type: str) -> bool:
     """Indique si ``msg_type`` est réservé à la bibliothèque."""
-    raise NotImplementedError
+    return msg_type.startswith(RESERVED_PREFIX)
 
 
 def encode(msg_type: str, data: Any = None) -> bytes:
@@ -53,12 +54,18 @@ def encode(msg_type: str, data: Any = None) -> bytes:
 
     Lève ``ProtocolError`` si ``data`` n'est pas sérialisable en JSON.
     """
-    raise NotImplementedError
+    
+    msg = encode_datagram(msg_type, data)
+    return HEADER.pack(len(msg)) + msg
+
 
 
 def encode_datagram(msg_type: str, data: Any = None) -> bytes:
     """Encode un message UDP (découverte) : corps JSON seul, sans en-tête."""
-    raise NotImplementedError
+    try:
+        return dumps({"t": msg_type, "d": data}, separators=(",", ":"), allow_nan=False).encode()
+    except (ValueError, TypeError) as e:
+        raise ProtocolError("Data n'est surment pas sériallisable en JSON") from e 
 
 
 def decode(body: bytes) -> tuple[str, Any]:
@@ -66,13 +73,24 @@ def decode(body: bytes) -> tuple[str, Any]:
 
     Lève ``ProtocolError`` si le corps n'est pas une enveloppe valide.
     """
-    raise NotImplementedError
+    try:
+        msg = loads(body.decode())
+        if not isinstance(msg["t"], str):
+            raise ProtocolError("Le type de la données est invalide.")
+
+        return msg["t"], msg["d"]
+    except (KeyError, TypeError, ValueError) as e:
+        raise ProtocolError ("Verifier le type des données transmisse.") from e
 
 
 async def read_message(reader: asyncio.StreamReader, max_size: int) -> tuple[str, Any]:
     """Lit exactement une trame sur ``reader`` et la décode.
 
-    Lève ``ProtocolError`` si la longueur annoncée dépasse ``max_size``,
+    Lève ``ProtocolError`` si la longueur annoncée est supérieur ou égale à ``max_size``,
     et ``asyncio.IncompleteReadError`` si la connexion se ferme.
     """
-    raise NotImplementedError
+    (msg_header,) = HEADER.unpack(await reader.readexactly(4))
+    if msg_header < max_size:
+        return decode(await reader.readexactly(msg_header))
+    else:
+        raise ProtocolError("Header invalide")
