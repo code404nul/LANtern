@@ -54,18 +54,20 @@ def encode(msg_type: str, data: Any = None) -> bytes:
 
     Lève ``ProtocolError`` si ``data`` n'est pas sérialisable en JSON.
     """
-    
-    msg = encode_datagram(msg_type, data)
-    return HEADER.pack(len(msg)) + msg
-
+    body = encode_datagram(msg_type, data)
+    return HEADER.pack(len(body)) + body
 
 
 def encode_datagram(msg_type: str, data: Any = None) -> bytes:
     """Encode un message UDP (découverte) : corps JSON seul, sans en-tête."""
     try:
-        return dumps({"t": msg_type, "d": data}, separators=(",", ":"), allow_nan=False).encode()
+        return dumps(
+            {"t": msg_type, "d": data}, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
     except (ValueError, TypeError) as e:
-        raise ProtocolError("Data n'est surment pas sériallisable en JSON") from e 
+        raise ProtocolError(
+            f"Data n'est pas sériallisable en JSON car sont types est : {type(data).__name__}"
+        ) from e
 
 
 def decode(body: bytes) -> tuple[str, Any]:
@@ -74,13 +76,15 @@ def decode(body: bytes) -> tuple[str, Any]:
     Lève ``ProtocolError`` si le corps n'est pas une enveloppe valide.
     """
     try:
-        msg = loads(body.decode())
+        msg = loads(body.decode("utf-8"))
         if not isinstance(msg["t"], str):
-            raise ProtocolError("Le type de la données est invalide.")
+            raise ProtocolError(
+                f"Le type de la données est invalide. Il doit etre un string, il est {type(msg['t']).__name__}"
+            )
 
         return msg["t"], msg["d"]
     except (KeyError, TypeError, ValueError) as e:
-        raise ProtocolError ("Verifier le type des données transmisse.") from e
+        raise ProtocolError("body est invalide.") from e
 
 
 async def read_message(reader: asyncio.StreamReader, max_size: int) -> tuple[str, Any]:
@@ -89,8 +93,9 @@ async def read_message(reader: asyncio.StreamReader, max_size: int) -> tuple[str
     Lève ``ProtocolError`` si la longueur annoncée est supérieur ou égale à ``max_size``,
     et ``asyncio.IncompleteReadError`` si la connexion se ferme.
     """
-    (msg_header,) = HEADER.unpack(await reader.readexactly(4))
-    if msg_header < max_size:
-        return decode(await reader.readexactly(msg_header))
-    else:
-        raise ProtocolError("Header invalide")
+    (body_size,) = HEADER.unpack(await reader.readexactly(HEADER.size))
+    if body_size >= max_size:
+        raise ProtocolError(
+            f"Header invalide, taile actuelle : {body_size} et la taille doit être strictement en dessous de {max_size}"
+        )
+    return decode(await reader.readexactly(body_size))
